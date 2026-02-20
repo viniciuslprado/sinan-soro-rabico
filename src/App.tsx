@@ -14,7 +14,8 @@ import {
   Home,
   Activity,
   Stethoscope,
-  ShieldAlert
+  ShieldAlert,
+  Droplets
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SinanRecord, SinanData } from './types';
@@ -102,6 +103,8 @@ const INITIAL_DATA: SinanData = {
   unidadeProcurouPaciente: '',
   eventoAdversoVacina: '',
   indicacaoSoro: '2',
+  soroAplicado: false,
+  soroAplicadoEm: '',
   pesoPaciente: '',
   quantidadeSoro: '',
   soroTipo: '',
@@ -119,7 +122,8 @@ const INITIAL_DATA: SinanData = {
 };
 
 export default function App() {
-  const [view, setView] = useState<'list' | 'form'>('list');
+  type View = 'notifications' | 'notificationForm' | 'soroList' | 'soroForm';
+  const [view, setView] = useState<View>('notifications');
   const [records, setRecords] = useState<SinanRecord[]>([]);
   const [currentRecord, setCurrentRecord] = useState<SinanRecord | null>(null);
   const [formData, setFormData] = useState<SinanData>(INITIAL_DATA);
@@ -143,28 +147,72 @@ export default function App() {
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const normalizeData = (data: Partial<SinanData> | undefined | null): SinanData => {
+    const d = (data ?? {}) as Partial<SinanData>;
+    return {
+      ...INITIAL_DATA,
+      ...d,
+      exposicaoTipo: { ...INITIAL_DATA.exposicaoTipo, ...(d.exposicaoTipo ?? {}) },
+      localizacao: { ...INITIAL_DATA.localizacao, ...(d.localizacao ?? {}) },
+      ferimentoTipo: { ...INITIAL_DATA.ferimentoTipo, ...(d.ferimentoTipo ?? {}) },
+      vacinaDosesDatas: { ...INITIAL_DATA.vacinaDosesDatas, ...(d.vacinaDosesDatas ?? {}) },
+      soroAplicado: d.soroAplicado ?? false,
+      soroAplicadoEm: d.soroAplicadoEm ?? '',
+    };
+  };
+
+  const saveNotification = async (dataToSave: SinanData) => {
+    const method = currentRecord ? 'PUT' : 'POST';
+    const url = currentRecord ? `/api/notifications/${currentRecord.id}` : '/api/notifications';
+    const payload = {
+      patient_name: dataToSave.nomePaciente,
+      notification_date: dataToSave.dataNotificacao,
+      attendance_date: dataToSave.dataAtendimento,
+      data: dataToSave,
+    };
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res;
+  };
+
+  const handleSaveNotification = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const method = currentRecord ? 'PUT' : 'POST';
-      const url = currentRecord ? `/api/notifications/${currentRecord.id}` : '/api/notifications';
-      
-      const payload = {
-        patient_name: formData.nomePaciente,
-        notification_date: formData.dataNotificacao,
-        attendance_date: formData.dataAtendimento,
-        data: formData
+      const res = await saveNotification(formData);
+      if (res.ok) {
+        setView('notifications');
+        fetchRecords();
+        setFormData(INITIAL_DATA);
+        setCurrentRecord(null);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveSoro = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentRecord) return;
+    setLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const dataToSave: SinanData = {
+        ...formData,
+        indicacaoSoro: '1',
+        soroAplicado: true,
+        soroAplicadoEm: formData.soroAplicadoEm?.trim() ? formData.soroAplicadoEm : today,
       };
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
+      const res = await saveNotification(dataToSave);
       if (res.ok) {
-        setView('list');
+        setView('soroList');
         fetchRecords();
         setFormData(INITIAL_DATA);
         setCurrentRecord(null);
@@ -188,11 +236,23 @@ export default function App() {
 
   const handleEdit = (record: SinanRecord) => {
     setCurrentRecord(record);
-    setFormData(record.data);
-    setView('form');
+    setFormData(normalizeData(record.data));
+    setView('notificationForm');
+  };
+
+  const handleOpenSoro = (record: SinanRecord) => {
+    setCurrentRecord(record);
+    setFormData(normalizeData(record.data));
+    setView('soroForm');
   };
 
   const filteredRecords = records.filter(r => 
+    r.patient_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.id.toString().includes(searchTerm)
+  );
+
+  const soroRecords = records.filter(r => r.data?.indicacaoSoro === '1');
+  const filteredSoroRecords = soroRecords.filter(r =>
     r.patient_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     r.id.toString().includes(searchTerm)
   );
@@ -213,18 +273,30 @@ export default function App() {
 
         <nav className="flex flex-col gap-2">
           <button 
-            onClick={() => { setView('list'); setCurrentRecord(null); setFormData(INITIAL_DATA); }}
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'list' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
+            onClick={() => { setView('notifications'); setCurrentRecord(null); setFormData(INITIAL_DATA); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'notifications' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
           >
             <ClipboardList size={20} />
             <span className="font-medium">Notificações</span>
           </button>
           <button 
-            onClick={() => { setView('form'); setCurrentRecord(null); setFormData(INITIAL_DATA); }}
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'form' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
+            onClick={() => { setView('notificationForm'); setCurrentRecord(null); setFormData(INITIAL_DATA); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'notificationForm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
           >
             <Plus size={20} />
             <span className="font-medium">Nova Ficha</span>
+          </button>
+          <button 
+            onClick={() => { setView('soroList'); setCurrentRecord(null); setFormData(INITIAL_DATA); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'soroList' || view === 'soroForm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
+          >
+            <Droplets size={20} />
+            <span className="font-medium">Soro</span>
+            {soroRecords.some(r => !r.data?.soroAplicado) && (
+              <span className="ml-auto text-[10px] font-bold px-2 py-1 rounded-full bg-red-500/20 text-red-200 border border-red-500/30">
+                {soroRecords.filter(r => !r.data?.soroAplicado).length}
+              </span>
+            )}
           </button>
         </nav>
 
@@ -237,9 +309,9 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-slate-50 p-4 md:p-8">
         <AnimatePresence mode="wait">
-          {view === 'list' ? (
+          {view === 'notifications' ? (
             <motion.div 
-              key="list"
+              key="notifications"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
@@ -314,7 +386,7 @@ export default function App() {
                   <h3 className="text-lg font-bold text-slate-900">Nenhuma notificação encontrada</h3>
                   <p className="text-slate-500 max-w-xs mx-auto mt-2">Comece criando uma nova ficha de investigação para registrar um atendimento.</p>
                   <button 
-                    onClick={() => setView('form')}
+                    onClick={() => setView('notificationForm')}
                     className="mt-6 btn-primary mx-auto"
                   >
                     <Plus size={20} /> Criar Primeira Ficha
@@ -322,9 +394,97 @@ export default function App() {
                 </div>
               )}
             </motion.div>
-          ) : (
+          ) : view === 'soroList' ? (
             <motion.div 
-              key="form"
+              key="soroList"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Soro</h2>
+                  <p className="text-slate-500">Pacientes com indicação de soro (SIM). Vermelho: pendente. Verde: realizado.</p>
+                </div>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Buscar paciente ou ID..."
+                    className="pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl w-full md:w-80 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
+              ) : filteredSoroRecords.length > 0 ? (
+                <div className="grid gap-4">
+                  {filteredSoroRecords.map((record) => {
+                    const aplicado = !!record.data?.soroAplicado;
+                    return (
+                      <motion.button
+                        type="button"
+                        key={record.id}
+                        layoutId={`soro-${record.id}`}
+                        onClick={() => handleOpenSoro(record)}
+                        className={[
+                          "text-left p-5 rounded-2xl border shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-4",
+                          aplicado ? "bg-emerald-50/70 border-emerald-200" : "bg-red-50/70 border-red-200"
+                        ].join(' ')}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={[
+                            "w-12 h-12 rounded-full flex items-center justify-center",
+                            aplicado ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                          ].join(' ')}>
+                            <Droplets size={24} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-3">
+                              <h3 className="font-bold text-slate-900">{record.patient_name}</h3>
+                              <span className={[
+                                "text-[10px] font-bold px-2 py-1 rounded-full border",
+                                aplicado ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-red-100 text-red-700 border-red-200"
+                              ].join(' ')}>
+                                {aplicado ? "SORO REALIZADO" : "SORO PENDENTE"}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 mt-1">
+                              <span className="flex items-center gap-1"><FileText size={14} /> ID: {record.id}</span>
+                              <span className="flex items-center gap-1"><ClipboardList size={14} /> Notif: {new Date(record.notification_date).toLocaleDateString()}</span>
+                              <span className="flex items-center gap-1"><Activity size={14} /> Atend: {new Date(record.attendance_date).toLocaleDateString()}</span>
+                              {record.data?.soroAplicadoEm && (
+                                <span className="flex items-center gap-1"><CheckCircle2 size={14} /> Aplicado: {new Date(record.data.soroAplicadoEm).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-500">
+                          <span className="text-sm font-semibold">{aplicado ? "Ver/editar" : "Preencher"}</span>
+                          <ChevronRight className="text-slate-300 ml-2" size={20} />
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="bg-white rounded-3xl p-12 text-center border-2 border-dashed border-slate-200">
+                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                    <Droplets size={32} />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">Nenhum paciente com soro indicado</h3>
+                  <p className="text-slate-500 max-w-md mx-auto mt-2">Quando uma notificação for salva com indicação de soro = SIM, ela aparecerá aqui automaticamente.</p>
+                </div>
+              )}
+            </motion.div>
+          ) : view === 'notificationForm' ? (
+            <motion.div 
+              key="notificationForm"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -332,7 +492,7 @@ export default function App() {
             >
               <div className="flex items-center justify-between mb-8">
                 <button 
-                  onClick={() => setView('list')}
+                  onClick={() => setView('notifications')}
                   className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-all"
                 >
                   <ArrowLeft size={20} /> Voltar ao histórico
@@ -345,7 +505,7 @@ export default function App() {
                 </div>
               </div>
 
-              <form onSubmit={handleSave} className="pb-20">
+              <form onSubmit={handleSaveNotification} className="pb-20">
                 {/* 1. Dados Gerais */}
                 <div className="form-section">
                   <div className="flex items-center gap-2 mb-6 text-blue-600">
@@ -813,7 +973,7 @@ export default function App() {
                       <div className="flex bg-slate-100 p-1 rounded-lg">
                         <button 
                           type="button"
-                          onClick={() => setFormData({...formData, indicacaoSoro: '1'})}
+                          onClick={() => setFormData({...formData, indicacaoSoro: '1', soroAplicado: false, soroAplicadoEm: ''})}
                           className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${formData.indicacaoSoro === '1' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
                         >
                           SIM
@@ -829,76 +989,23 @@ export default function App() {
                     </div>
                   </div>
 
-                  {formData.indicacaoSoro === '1' && (
-                    <motion.div 
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="space-y-6 pt-4 border-t border-slate-100"
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div>
-                          <label className="form-label">Peso do Paciente (Kg)</label>
-                          <input 
-                            type="text" className="form-input" 
-                            value={formData.pesoPaciente}
-                            onChange={e => setFormData({...formData, pesoPaciente: e.target.value})}
-                          />
-                        </div>
-                        <div>
-                          <label className="form-label">Quantidade Aplicada (ml)</label>
-                          <input 
-                            type="text" className="form-input" 
-                            value={formData.quantidadeSoro}
-                            onChange={e => setFormData({...formData, quantidadeSoro: e.target.value})}
-                          />
-                        </div>
-                        <div>
-                          <label className="form-label">Tipo de Soro</label>
-                          <select 
-                            className="form-select"
-                            value={formData.soroTipo}
-                            onChange={e => setFormData({...formData, soroTipo: e.target.value})}
-                          >
-                            <option value="">Selecione</option>
-                            <option value="1">Heterólogo</option>
-                            <option value="2">Homólogo</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="form-label">Infiltração no Local?</label>
-                          <select 
-                            className="form-select"
-                            value={formData.infiltracaoSoro}
-                            onChange={e => setFormData({...formData, infiltracaoSoro: e.target.value})}
-                          >
-                            <option value="">Selecione</option>
-                            <option value="1">Sim</option>
-                            <option value="2">Não</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="form-label">Extensão da Infiltração</label>
-                          <select 
-                            className="form-select"
-                            value={formData.infiltracaoExtensao}
-                            onChange={e => setFormData({...formData, infiltracaoExtensao: e.target.value})}
-                          >
-                            <option value="">Selecione</option>
-                            <option value="Total">Total</option>
-                            <option value="Parcial">Parcial</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="form-label">Laboratório do Soro</label>
-                          <input 
-                            type="text" className="form-input" 
-                            value={formData.soroLaboratorio}
-                            onChange={e => setFormData({...formData, soroLaboratorio: e.target.value})}
-                          />
-                        </div>
+                  <div className="pt-4 border-t border-slate-100">
+                    <p className="text-sm text-slate-500">
+                      Se <span className="font-bold">SIM</span>, o paciente aparecerá na aba <span className="font-bold">Soro</span> para preenchimento do formulário específico quando ele retornar para aplicação.
+                    </p>
+                    {formData.indicacaoSoro === '1' && (
+                      <div className="mt-3 inline-flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border bg-red-50 text-red-700 border-red-200">
+                        <AlertCircle size={16} />
+                        Pendente de aplicação do soro
                       </div>
-                    </motion.div>
-                  )}
+                    )}
+                    {formData.indicacaoSoro !== '1' && (
+                      <div className="mt-3 inline-flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border bg-slate-50 text-slate-600 border-slate-200">
+                        <CheckCircle2 size={16} />
+                        Sem indicação de soro
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* 7. Conclusão e Eventos */}
@@ -978,7 +1085,7 @@ export default function App() {
                 <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white/80 backdrop-blur-md border-t border-slate-200 p-4 flex justify-end gap-4 z-50">
                   <button 
                     type="button"
-                    onClick={() => setView('list')}
+                    onClick={() => setView('notifications')}
                     className="btn-secondary"
                   >
                     Cancelar
@@ -992,6 +1099,216 @@ export default function App() {
                       <>
                         <CheckCircle2 size={20} />
                         {currentRecord ? 'Atualizar Notificação' : 'Salvar Notificação'}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="soroForm"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="max-w-4xl mx-auto"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <button 
+                  onClick={() => setView('soroList')}
+                  className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-all"
+                >
+                  <ArrowLeft size={20} /> Voltar para Soro
+                </button>
+                <div className="text-right">
+                  <h2 className="text-2xl font-bold text-slate-900">Formulário de Soro</h2>
+                  <p className="text-sm text-slate-500">Preenchimento para pacientes com indicação de soro</p>
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-6 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Paciente</p>
+                    <p className="text-lg font-bold text-slate-900">{currentRecord?.patient_name ?? formData.nomePaciente}</p>
+                    <p className="text-sm text-slate-500 mt-1">
+                      ID: <span className="font-semibold">{currentRecord?.id ?? '-'}</span> ·
+                      Notificação: <span className="font-semibold">{currentRecord ? new Date(currentRecord.notification_date).toLocaleDateString() : '-'}</span> ·
+                      Atendimento: <span className="font-semibold">{currentRecord ? new Date(currentRecord.attendance_date).toLocaleDateString() : '-'}</span>
+                    </p>
+                  </div>
+                  <div className={[
+                    "inline-flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-xl border",
+                    formData.soroAplicado ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
+                  ].join(' ')}>
+                    <Droplets size={16} />
+                    {formData.soroAplicado ? `SORO REALIZADO${formData.soroAplicadoEm ? ` (${new Date(formData.soroAplicadoEm).toLocaleDateString()})` : ''}` : 'SORO PENDENTE'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-6 shadow-sm">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Dados SINAN (pré-preenchidos)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Tratamento indicado</p>
+                    <p className="text-sm font-semibold text-slate-800">{formData.tratamentoIndicado || '-'}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Espécie do animal</p>
+                    <p className="text-sm font-semibold text-slate-800">{formData.especieAnimal || '-'}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Condição do animal</p>
+                    <p className="text-sm font-semibold text-slate-800">{formData.condicaoAnimal || '-'}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Data da exposição</p>
+                    <p className="text-sm font-semibold text-slate-800">{formData.dataExposicao ? new Date(formData.dataExposicao).toLocaleDateString() : '-'}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Ferimento</p>
+                    <p className="text-sm font-semibold text-slate-800">{formData.ferimento || '-'}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Observação do animal</p>
+                    <p className="text-sm font-semibold text-slate-800">{formData.animalObservavel || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveSoro} className="pb-20">
+                <div className="form-section">
+                  <div className="flex items-center gap-2 mb-6 text-blue-600">
+                    <AlertCircle size={20} />
+                    <h3 className="font-bold uppercase tracking-widest text-sm">Soro Antirrábico</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                      <label className="form-label">Data da Aplicação</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        value={formData.soroAplicadoEm || ''}
+                        onChange={e => setFormData({ ...formData, soroAplicadoEm: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Peso do Paciente (Kg)</label>
+                      <input 
+                        type="text" className="form-input" 
+                        value={formData.pesoPaciente}
+                        onChange={e => setFormData({...formData, pesoPaciente: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Quantidade Aplicada (ml)</label>
+                      <input 
+                        type="text" className="form-input" 
+                        value={formData.quantidadeSoro}
+                        onChange={e => setFormData({...formData, quantidadeSoro: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Tipo de Soro</label>
+                      <select 
+                        className="form-select"
+                        value={formData.soroTipo}
+                        onChange={e => setFormData({...formData, soroTipo: e.target.value})}
+                      >
+                        <option value="">Selecione</option>
+                        <option value="1">Heterólogo</option>
+                        <option value="2">Homólogo</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Infiltração no Local?</label>
+                      <select 
+                        className="form-select"
+                        value={formData.infiltracaoSoro}
+                        onChange={e => setFormData({...formData, infiltracaoSoro: e.target.value})}
+                      >
+                        <option value="">Selecione</option>
+                        <option value="1">Sim</option>
+                        <option value="2">Não</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Extensão da Infiltração</label>
+                      <select 
+                        className="form-select"
+                        value={formData.infiltracaoExtensao}
+                        onChange={e => setFormData({...formData, infiltracaoExtensao: e.target.value})}
+                      >
+                        <option value="">Selecione</option>
+                        <option value="Total">Total</option>
+                        <option value="Parcial">Parcial</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Laboratório do Soro</label>
+                      <input 
+                        type="text" className="form-input" 
+                        value={formData.soroLaboratorio}
+                        onChange={e => setFormData({...formData, soroLaboratorio: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Partida/Lote do Soro</label>
+                      <input 
+                        type="text" className="form-input" 
+                        value={formData.soroPartida}
+                        onChange={e => setFormData({...formData, soroPartida: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Data de Encerramento</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        value={formData.dataEncerramento}
+                        onChange={e => setFormData({ ...formData, dataEncerramento: e.target.value })}
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="form-label">Evento Adverso do Soro</label>
+                      <input 
+                        type="text" className="form-input" 
+                        value={formData.eventoAdversoSoro}
+                        onChange={e => setFormData({...formData, eventoAdversoSoro: e.target.value})}
+                        placeholder="Se houver, descreva..."
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="form-label">Observações</label>
+                      <textarea
+                        className="form-input h-28 resize-none"
+                        value={formData.observacoes}
+                        onChange={e => setFormData({ ...formData, observacoes: e.target.value })}
+                        placeholder="Informações adicionais relevantes para análise..."
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white/80 backdrop-blur-md border-t border-slate-200 p-4 flex justify-end gap-4 z-50">
+                  <button 
+                    type="button"
+                    onClick={() => setView('soroList')}
+                    className="btn-secondary"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={loading}
+                    className="btn-primary"
+                  >
+                    {loading ? 'Salvando...' : (
+                      <>
+                        <CheckCircle2 size={20} />
+                        Salvar Soro
                       </>
                     )}
                   </button>

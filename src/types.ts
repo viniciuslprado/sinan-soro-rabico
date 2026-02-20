@@ -97,6 +97,8 @@ export interface SinanData {
 
   // Soro
   indicacaoSoro: string;
+  soroAplicado?: boolean;
+  soroAplicadoEm?: string; // YYYY-MM-DD
   pesoPaciente: string;
   quantidadeSoro: string;
   soroTipo: string;

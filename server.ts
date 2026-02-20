@@ -22,6 +22,14 @@ db.exec(`
   )
 `);
 
+function computeStatus(data: any): string {
+  const indicacaoSoro = data?.indicacaoSoro;
+  const soroAplicado = !!data?.soroAplicado;
+  if (indicacaoSoro === "1" && soroAplicado) return "soro_done";
+  if (indicacaoSoro === "1" && !soroAplicado) return "soro_pending";
+  return "pending";
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -48,17 +56,19 @@ async function startServer() {
 
   app.post("/api/notifications", (req, res) => {
     const { patient_name, notification_date, attendance_date, data } = req.body;
+    const status = computeStatus(data);
     const info = db.prepare(
-      "INSERT INTO notifications (patient_name, notification_date, attendance_date, data) VALUES (?, ?, ?, ?)"
-    ).run(patient_name, notification_date, attendance_date, JSON.stringify(data));
+      "INSERT INTO notifications (patient_name, notification_date, attendance_date, status, data) VALUES (?, ?, ?, ?, ?)"
+    ).run(patient_name, notification_date, attendance_date, status, JSON.stringify(data));
     res.status(201).json({ id: info.lastInsertRowid });
   });
 
   app.put("/api/notifications/:id", (req, res) => {
     const { patient_name, notification_date, attendance_date, data } = req.body;
+    const status = computeStatus(data);
     db.prepare(
-      "UPDATE notifications SET patient_name = ?, notification_date = ?, attendance_date = ?, data = ? WHERE id = ?"
-    ).run(patient_name, notification_date, attendance_date, JSON.stringify(data), req.params.id);
+      "UPDATE notifications SET patient_name = ?, notification_date = ?, attendance_date = ?, status = ?, data = ? WHERE id = ?"
+    ).run(patient_name, notification_date, attendance_date, status, JSON.stringify(data), req.params.id);
     res.json({ success: true });
   });
 
